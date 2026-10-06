@@ -1,0 +1,147 @@
+import os
+import sys
+import base64
+import socket
+import select
+import threading
+import urllib.request
+import json
+import winreg
+
+# Cấu hình Render Proxy
+UPSTREAM_HOST = "render-proxy-ip.onrender.com"
+UPSTREAM_PORT = 443
+UPSTREAM_USER = "ksmart"
+UPSTREAM_PASS = "98427189427194817294817294817294"
+
+LOCAL_PORT = 10808
+AUTH_HEADER = base64.b64encode(f"{UPSTREAM_USER}:{UPSTREAM_PASS}".encode()).decode()
+
+def set_windows_proxy(enable: bool):
+    """Bật hoặc tắt Proxy trên hệ thống Windows."""
+    reg_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_WRITE) as key:
+            if enable:
+                winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
+                winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{LOCAL_PORT}")
+                print(f"✅ Đã BẬT Proxy hệ thống Windows (127.0.0.1:{LOCAL_PORT})")
+            else:
+                winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
+                print("🛑 Đã TẮT Proxy hệ thống Windows (Đã về IP mạng gốc)")
+    except Exception as e:
+        print(f"❌ Lỗi chỉnh registry proxy: {e}")
+
+def check_ip():
+    """Kiểm tra IP hiện tại của máy tính."""
+    try:
+        req = urllib.request.Request("https://api.ipify.org?format=json")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            ip = data.get("ip")
+            print(f"\n👉 IP HIỆN TẠI: {ip}")
+            try:
+                geo_req = urllib.request.Request(f"https://ipapi.co/{ip}/json/")
+                with urllib.request.urlopen(geo_req, timeout=10) as geo_res:
+                    geo = json.loads(geo_res.read().decode())
+                    print(f"🌍 Vị trí: {geo.get('city')}, {geo.get('country_name')} (ISP: {geo.get('org')})")
+            except:
+                pass
+    except Exception as e:
+        print(f"❌ Không thể kiểm tra IP: {e}")
+
+def forward(src, dst):
+    try:
+        while True:
+            r, _, _ = select.select([src], [], [], 10)
+            if not r:
+                continue
+            data = src.recv(8192)
+            if not data:
+                break
+            dst.sendall(data)
+    except:
+        pass
+    finally:
+        src.close()
+        dst.close()
+
+def handle_client(client_sock):
+    try:
+        req = client_sock.recv(8192)
+        if not req:
+            client_sock.close()
+            return
+        
+        # Kết nối tới Render Proxy Upstream
+        import ssl
+        ctx = ssl.create_default_context()
+        raw_sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=15)
+        upstream_sock = ctx.wrap_socket(raw_sock, server_hostname=UPSTREAM_HOST)
+
+        # Chèn Header Proxy-Authorization nếu là request CONNECT hoặc HTTP
+        first_line = req.split(b"\r\n")[0]
+        if first_line.startswith(b"CONNECT"):
+            # Tunnel CONNECT
+            target = first_line.split()[1].decode()
+            connect_req = f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Authorization: Basic {AUTH_HEADER}\r\nProxy-Connection: keep-alive\r\n\r\n"
+            upstream_sock.sendall(connect_req.encode())
+            
+            resp = upstream_sock.recv(8192)
+            if b"200 Connection established" in resp or b"200 OK" in resp or resp.startswith(b"HTTP/1.1 200"):
+                client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                t1 = threading.Thread(target=forward, args=(client_sock, upstream_sock), daemon=True)
+                t2 = threading.Thread(target=forward, args=(upstream_sock, client_sock), daemon=True)
+                t1.start()
+                t2.start()
+                t1.join()
+            else:
+                client_sock.sendall(resp)
+                client_sock.close()
+                upstream_sock.close()
+        else:
+            # Standard HTTP GET/POST
+            headers = req.decode(errors='ignore')
+            if "Proxy-Authorization:" not in headers:
+                lines = headers.split("\r\n")
+                lines.insert(1, f"Proxy-Authorization: Basic {AUTH_HEADER}")
+                req = "\r\n".join(lines).encode()
+            upstream_sock.sendall(req)
+            t1 = threading.Thread(target=forward, args=(client_sock, upstream_sock), daemon=True)
+            t2 = threading.Thread(target=forward, args=(upstream_sock, client_sock), daemon=True)
+            t1.start()
+            t2.start()
+            t1.join()
+    except Exception as e:
+        client_sock.close()
+
+def start_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", LOCAL_PORT))
+    server.listen(100)
+    print(f"🚀 Cầu nối Proxy Render đang chạy ngầm trên cổng 127.0.0.1:{LOCAL_PORT}...")
+    
+    set_windows_proxy(True)
+    check_ip()
+    print("\n👉 Mọi trình duyệt (Chrome, Edge, Cốc Cốc) và ứng dụng hiện đã được đổi sang IP Singapore!")
+    print("👉 Nhấn Ctrl+C để tắt đổi IP và khôi phục mạng gốc.")
+
+    try:
+        while True:
+            client, _ = server.accept()
+            threading.Thread(target=handle_client, args=(client,), daemon=True).start()
+    except KeyboardInterrupt:
+        print("\nĐang tắt cầu nối...")
+    finally:
+        set_windows_proxy(False)
+        server.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "off":
+        set_windows_proxy(False)
+        check_ip()
+    elif len(sys.argv) > 1 and sys.argv[1] == "check":
+        check_ip()
+    else:
+        start_server()
