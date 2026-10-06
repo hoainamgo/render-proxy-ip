@@ -5,7 +5,7 @@ import sys
 PROXY_HOST = "render-proxy-ip.onrender.com"
 PROXY_PORT = 443  # Cổng HTTPS SSL mặc định của Render
 PROXY_USER = "ksmart"
-PROXY_PASS = "98427189427194817294817294817294"  # Dãy số bảo mật 32 ký tự
+PROXY_PASS = "RenderProxy2026!"
 
 def test_proxy():
     proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
@@ -30,7 +30,7 @@ def test_proxy():
         print(f"🌍 Vị trí IP: {geo.get('city')}, {geo.get('country_name')} (ISP: {geo.get('org')})")
         print("✅ Proxy hoạt động hoàn hảo 100%!")
     except Exception as e:
-        print(f"❌ Lỗi kết nối proxy (hãy đợi service khởi động xong sau khi đổi mật khẩu): {e}")
+        print(f"❌ Lỗi kết nối proxy (có thể container đang build, vui lòng đợi 1-2 phút): {e}")
 
 if __name__ == "__main__":
     test_proxy()
