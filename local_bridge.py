@@ -54,22 +54,24 @@ def kill_existing_gost():
 def check_ip():
     """Kiem tra IP va vi tri hien tai."""
     print("------------------------------------------------------------")
-    print(">> Dang kiem tra IP...")
+    print(">> Dang kiem tra IP qua Proxy...")
     try:
+        proxy_handler = urllib.request.ProxyHandler({'http': f'http://127.0.0.1:{LOCAL_PORT}', 'https': f'http://127.0.0.1:{LOCAL_PORT}'})
+        opener = urllib.request.build_opener(proxy_handler)
         req = urllib.request.Request("https://api.ipify.org?format=json", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with opener.open(req, timeout=10) as response:
             data = json.loads(response.read().decode())
             ip = data.get("ip")
             print(f"[*] IP HIEN TAI : {ip}")
             try:
                 geo_req = urllib.request.Request(f"http://ip-api.com/json/{ip}", headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(geo_req, timeout=10) as geo_res:
+                with opener.open(geo_req, timeout=10) as geo_res:
                     geo = json.loads(geo_res.read().decode())
                     print(f"[*] VI TRI     : {geo.get('city')}, {geo.get('country')} (ISP: {geo.get('isp')})")
             except:
                 pass
     except Exception as e:
-        print(f"[!] Chua lay duoc IP: {e}")
+        print(f"[!] Dang ket noi: {e}")
     print("------------------------------------------------------------")
 
 def cleanup():
@@ -86,7 +88,8 @@ def start_proxy():
 
     kill_existing_gost()
 
-    upstream_url = f"wss://{UPSTREAM_USER}:{UPSTREAM_PASS}@{UPSTREAM_HOST}:{UPSTREAM_PORT}"
+    # Ket noi toi WebSocket path /ws
+    upstream_url = f"wss://{UPSTREAM_USER}:{UPSTREAM_PASS}@{UPSTREAM_HOST}:{UPSTREAM_PORT}?path=/ws"
     cmd = [
         GOST_EXE,
         "-L", f":{LOCAL_PORT}",
@@ -121,7 +124,6 @@ def start_proxy():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "off":
         cleanup()
-        check_ip()
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
         check_ip()
     else:
